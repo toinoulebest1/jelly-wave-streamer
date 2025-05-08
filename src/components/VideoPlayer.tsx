@@ -1,7 +1,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { jellyfinService } from "@/services/jellyfinService";
-import { JellyfinMediaItem, PlaybackOptions, BitrateTestResult } from "@/types/jellyfin";
+import { JellyfinMediaItem, PlaybackOptions, BitrateTestResult, VideoPlayerProps } from "@/types/jellyfin";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -10,13 +10,14 @@ import { Settings, Activity, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-interface VideoPlayerProps {
-  itemId: string;
-  onClose: () => void;
-}
+// Import Video.js
+import videojs from "video.js";
+import "video.js/dist/video-js.css";
 
 const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const videoJsRef = useRef<HTMLDivElement>(null);
+  const [player, setPlayer] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mediaItem, setMediaItem] = useState<JellyfinMediaItem | null>(null);
@@ -24,6 +25,7 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   const [isBitrateTestRunning, setIsBitrateTestRunning] = useState(true);
   const [detectedBitrate, setDetectedBitrate] = useState<number | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [playerType, setPlayerType] = useState<'native' | 'videojs'>('videojs');
   
   // Options de lecture
   const [playbackOptions, setPlaybackOptions] = useState<PlaybackOptions>({
@@ -123,42 +125,79 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   // Générer l'URL de streaming basée sur les options actuelles
   const streamUrl = mediaItem ? jellyfinService.getStreamUrl(itemId, playbackOptions) : '';
 
+  // Initialiser Video.js
+  useEffect(() => {
+    if (playerType !== 'videojs' || !streamUrl || isBitrateTestRunning || !mediaItem || !videoJsRef.current) return;
+    
+    setIsLoading(true);
+    setError(null);
+
+    const poster = mediaItem?.ImageTags?.Primary 
+      ? jellyfinService.getImageUrl(mediaItem.Id, mediaItem.ImageTags.Primary) 
+      : undefined;
+      
+    const videoJsOptions = {
+      autoplay: true,
+      controls: true,
+      responsive: true,
+      fluid: true,
+      poster: poster,
+      sources: [{
+        src: streamUrl,
+        type: playbackOptions.enableTranscoding ? 'application/x-mpegURL' : 'video/mp4'
+      }]
+    };
+
+    // Nettoyer l'instance précédente du lecteur
+    if (player) {
+      player.dispose();
+    }
+
+    console.log("Initializing Video.js with URL:", streamUrl);
+    const vjsPlayer = videojs(videoJsRef.current, videoJsOptions, function onPlayerReady() {
+      console.log('Video.js player is ready');
+      setIsLoading(false);
+      
+      vjsPlayer.on('error', function() {
+        const error = vjsPlayer.error();
+        console.error("Video.js error:", error);
+        handleVideoError();
+      });
+    });
+    
+    setPlayer(vjsPlayer);
+
+    return () => {
+      if (vjsPlayer) {
+        vjsPlayer.dispose();
+      }
+    };
+  }, [streamUrl, isBitrateTestRunning, mediaItem, playerType, playbackOptions.enableTranscoding]);
+
+  // Effet pour le lecteur natif (quand Video.js n'est pas utilisé)
   useEffect(() => {
     // Afficher l'URL de streaming pour le débogage
     if (streamUrl) {
-      console.log("playing url:", streamUrl);
+      console.log("Playing URL:", streamUrl);
     }
     
-    // Rechargement de la vidéo quand les options de lecture changent
-    if (videoRef.current && !isBitrateTestRunning && mediaItem) {
+    // Rechargement de la vidéo quand les options de lecture changent (pour le lecteur natif)
+    if (videoRef.current && !isBitrateTestRunning && mediaItem && playerType === 'native') {
       setIsLoading(true);
       setError(null);
       videoRef.current.load();
     }
-  }, [streamUrl, isBitrateTestRunning, mediaItem]);
+  }, [streamUrl, isBitrateTestRunning, mediaItem, playerType]);
 
   const handleVideoLoad = () => {
     setIsLoading(false);
     setError(null);
   };
 
-  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-    console.error("Erreur de lecture vidéo:", e);
+  const handleVideoError = () => {
+    console.error("Erreur de lecture vidéo");
     setIsLoading(false);
-    
-    // Différentes erreurs possibles avec leurs codes
-    const errorMessages: Record<number, string> = {
-      1: "La lecture a été interrompue",
-      2: "Le réseau a rencontré un problème",
-      3: "Le format du média n'est pas pris en charge",
-      4: "Le média n'a pas pu être décodé",
-    };
-    
-    const videoElement = e.target as HTMLVideoElement;
-    const errorCode = videoElement.error?.code || 0;
-    const errorMessage = errorMessages[errorCode] || "Erreur de lecture de la vidéo";
-    
-    setError(`${errorMessage}. Veuillez réessayer ou modifier les paramètres de lecture.`);
+    setError("Erreur de lecture de la vidéo. Veuillez réessayer ou modifier les paramètres de lecture.");
   };
 
   const handleRetry = () => {
@@ -180,8 +219,12 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
       }));
     }
     
-    // Forcer le rechargement de la vidéo
-    if (videoRef.current) {
+    // Si on utilise videojs, on doit réinitialiser le lecteur
+    if (playerType === 'videojs' && player) {
+      player.dispose();
+      setPlayer(null);
+    } else if (playerType === 'native' && videoRef.current) {
+      // Forcer le rechargement de la vidéo
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.load();
@@ -210,6 +253,20 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
     } else {
       return `${(bitrate / 1000).toFixed(0)} Kbps`;
     }
+  };
+
+  const handleSwitchPlayer = (type: 'native' | 'videojs') => {
+    setPlayerType(type);
+    setError(null);
+    setIsLoading(true);
+    
+    // Si on passe à videojs et qu'un player existe déjà, on le nettoie
+    if (type === 'native' && player) {
+      player.dispose();
+      setPlayer(null);
+    }
+    
+    toast.info(`Lecteur ${type === 'native' ? 'natif' : 'Video.js'} activé`);
   };
 
   return (
@@ -272,9 +329,9 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
           </div>
         )}
         
-        {!isBitrateTestRunning && mediaItem && !error && (
+        {!isBitrateTestRunning && mediaItem && !error && playerType === 'native' && (
           <video
-            key={`${itemId}-${playbackOptions.enableTranscoding}-${playbackOptions.maxStreamingBitrate}`}
+            key={`${itemId}-${playerType}-${playbackOptions.enableTranscoding}-${playbackOptions.maxStreamingBitrate}`}
             ref={videoRef}
             className="w-full h-full"
             controls
@@ -288,7 +345,34 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
           </video>
         )}
         
-        <div className="absolute top-4 right-16 z-10">
+        {!isBitrateTestRunning && mediaItem && !error && playerType === 'videojs' && (
+          <div className="w-full h-full">
+            <div data-vjs-player>
+              <video 
+                ref={videoJsRef}
+                className="video-js vjs-big-play-centered vjs-fluid"
+                key={`${itemId}-${playerType}-${playbackOptions.enableTranscoding}-${playbackOptions.maxStreamingBitrate}`}
+              ></video>
+            </div>
+          </div>
+        )}
+        
+        <div className="absolute top-4 right-16 z-10 flex space-x-2">
+          <div className="bg-black/60 hover:bg-black/80 text-white rounded-full p-2">
+            <Select
+              value={playerType}
+              onValueChange={(value) => handleSwitchPlayer(value as 'native' | 'videojs')}
+            >
+              <SelectTrigger className="w-[120px] bg-transparent border-none">
+                <SelectValue placeholder="Lecteur" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="native">Natif</SelectItem>
+                <SelectItem value="videojs">Video.js</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
           <button
             className="bg-black/60 hover:bg-black/80 text-white rounded-full p-2"
             onClick={(e) => {

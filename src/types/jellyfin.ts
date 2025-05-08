@@ -95,3 +95,10 @@ export interface BitrateTestResult {
   bitrate: number;
   isComplete: boolean;
 }
+
+export interface VideoPlayerProps {
+  itemId: string;
+  onClose: () => void;
+}
+
+export type VideoPlayerType = 'native' | 'videojs';
