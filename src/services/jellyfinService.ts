@@ -376,6 +376,9 @@ class JellyfinService {
   getStreamUrl(itemId: string, options: PlaybackOptions = {}): string {
     if (!this.isConnected || !itemId) return '';
     
+    // Formatage correct de l'ID du média pour l'URL
+    const formattedItemId = itemId.includes('-') ? itemId : itemId.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, "$1-$2-$3-$4-$5");
+    
     const uniquePlaySessionId = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
     
     const params = new URLSearchParams({
@@ -398,9 +401,9 @@ class JellyfinService {
     }
     
     if (options.enableTranscoding) {
-      // Ajout des paramètres de transcodage
-      params.append('VideoCodec', 'h264');
-      params.append('AudioCodec', 'aac');
+      // Ajout des paramètres de transcodage avancés selon l'URL fournie
+      params.append('VideoCodec', 'av1,h264,vp9');
+      params.append('AudioCodec', 'aac,opus,flac');
       
       if (options.maxStreamingBitrate) {
         params.append('VideoBitrate', options.maxStreamingBitrate.toString());
@@ -415,19 +418,32 @@ class JellyfinService {
         params.append('MaxHeight', options.maxHeight.toString());
       }
       
-      // Paramètres supplémentaires pour un meilleur transcodage
+      // Paramètres supplémentaires pour un transcodage plus avancé
       params.append('SubtitleMethod', 'Encode');
       params.append('TranscodingMaxAudioChannels', '2');
-      params.append('RequireAvc', 'true');
-      params.append('h264-level', '42');
+      params.append('RequireAvc', 'false'); // Permettre d'autres codecs que AVC/h264
+      params.append('EnableAudioVbrEncoding', 'true');
+      params.append('h264-level', '40');
+      params.append('h264-videobitdepth', '8');
       params.append('h264-profile', 'high');
-      params.append('TranscodeReasons', 'ContainerNotSupported,VideoCodecNotSupported,AudioCodecNotSupported');
+      params.append('av1-profile', 'main');
+      params.append('av1-rangetype', 'SDR');
+      params.append('av1-level', '19');
+      params.append('vp9-rangetype', 'SDR');
+      params.append('h264-rangetype', 'SDR');
+      params.append('h264-deinterlace', 'true');
+      params.append('SegmentContainer', 'mp4');
+      params.append('MinSegments', '1');
+      params.append('BreakOnNonKeyFrames', 'True');
+      params.append('MaxFramerate', '25');
       
-      return `${this.serverUrl}/videos/${itemId}/master.m3u8?${params.toString()}`;
+      params.append('TranscodeReasons', 'ContainerNotSupported,AudioCodecNotSupported');
+      
+      return `${this.serverUrl}/videos/${formattedItemId}/master.m3u8?${params.toString()}`;
     }
     
     // Lecture directe (sans transcodage)
-    return `${this.serverUrl}/Videos/${itemId}/stream?static=true&${params.toString()}`;
+    return `${this.serverUrl}/Videos/${formattedItemId}/stream?static=true&${params.toString()}`;
   }
 
   formatRuntime(runtimeTicks?: number): string {
