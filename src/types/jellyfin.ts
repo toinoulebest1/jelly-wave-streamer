@@ -85,3 +85,8 @@ export interface PlaybackOptions {
   maxHeight?: number;
   enableTranscoding?: boolean;
 }
+
+export interface BitrateTestResult {
+  bitrate: number;
+  isComplete: boolean;
+}

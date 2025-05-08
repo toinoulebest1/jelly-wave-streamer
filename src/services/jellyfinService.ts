@@ -1,5 +1,14 @@
 import { toast } from "sonner";
-import { JellyfinAuthResponse, JellyfinCredentials, JellyfinLibrary, JellyfinMediaItem, JellyfinSearchResult, JellyfinUser, PlaybackOptions } from "../types/jellyfin";
+import { 
+  JellyfinAuthResponse, 
+  JellyfinCredentials, 
+  JellyfinLibrary, 
+  JellyfinMediaItem, 
+  JellyfinSearchResult, 
+  JellyfinUser, 
+  PlaybackOptions,
+  BitrateTestResult 
+} from "../types/jellyfin";
 
 class JellyfinService {
   private serverUrl: string = '';
@@ -324,12 +333,53 @@ class JellyfinService {
     return `${this.serverUrl}/Items/${itemId}/Images/Backdrop?${params.toString()}`;
   }
 
+  // Test de débit pour optimiser la qualité de streaming
+  async testBitrate(size: number = 1000000): Promise<BitrateTestResult> {
+    if (!this.isConnected) {
+      return { bitrate: 8000000, isComplete: false }; // Valeur par défaut 8 Mbps
+    }
+
+    try {
+      const url = `${this.serverUrl}/Playback/BitrateTest?Size=${size}`;
+      console.log(`Requesting ${url}`);
+      
+      const startTime = performance.now();
+      const response = await fetch(url, {
+        headers: this.getHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erreur lors du test de débit: ${response.status}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      const endTime = performance.now();
+      const duration = (endTime - startTime) / 1000; // en secondes
+      const bytes = buffer.byteLength;
+      
+      // Calcul du débit en bits par seconde (bps)
+      const bitsLoaded = bytes * 8;
+      const bitrate = Math.round(bitsLoaded / duration);
+      
+      console.log(`BitrateTest ${bytes} bytes loaded (${size} requested) in ${duration} seconds -> ${bitrate} bps`);
+      
+      return {
+        bitrate,
+        isComplete: duration < 5 && bytes >= size // Le test est complet si la durée est raisonnable
+      };
+    } catch (error) {
+      console.error('Erreur lors du test de débit:', error);
+      return { bitrate: 8000000, isComplete: false }; // Valeur par défaut en cas d'erreur
+    }
+  }
+
   getStreamUrl(itemId: string, options: PlaybackOptions = {}): string {
     if (!this.isConnected || !itemId) return '';
     
     const params = new URLSearchParams({
       static: options.enableTranscoding ? 'false' : 'true',
-      api_key: this.apiKey
+      api_key: this.apiKey,
+      DeviceId: this.deviceId
     });
     
     if (options.startTimeTicks) {
@@ -346,15 +396,14 @@ class JellyfinService {
     
     if (options.enableTranscoding) {
       // Ajout des paramètres de transcodage
-      params.append('VideoCodec', 'h264');
-      params.append('AudioCodec', 'aac');
+      params.append('VideoCodec', 'av1,h264,vp9');
+      params.append('AudioCodec', 'aac,opus,flac');
       params.append('TranscodingContainer', 'ts');
       params.append('TranscodingProtocol', 'hls');
       
       if (options.maxStreamingBitrate) {
-        params.append('MaxStreamingBitrate', options.maxStreamingBitrate.toString());
-      } else {
-        params.append('MaxStreamingBitrate', '8000000'); // 8 Mbps par défaut
+        params.append('VideoBitrate', options.maxStreamingBitrate.toString());
+        params.append('AudioBitrate', '384000'); // 384 kbps pour l'audio
       }
       
       if (options.maxWidth) {
@@ -364,6 +413,15 @@ class JellyfinService {
       if (options.maxHeight) {
         params.append('maxHeight', options.maxHeight.toString());
       }
+      
+      // Paramètres supplémentaires pour un meilleur transcodage
+      params.append('SubtitleMethod', 'Encode');
+      params.append('TranscodingMaxAudioChannels', '2');
+      params.append('RequireAvc', 'false');
+      params.append('EnableAudioVbrEncoding', 'true');
+      params.append('SegmentContainer', 'mp4');
+      params.append('MinSegments', '1');
+      params.append('BreakOnNonKeyFrames', 'True');
       
       return `${this.serverUrl}/Videos/${itemId}/master.m3u8?${params.toString()}`;
     }
