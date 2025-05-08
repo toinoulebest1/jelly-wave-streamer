@@ -61,6 +61,10 @@ export interface JellyfinMediaSource {
   Name?: string;
   Container?: string;
   MediaStreams?: JellyfinMediaStream[];
+  SupportsDirectPlay?: boolean;
+  SupportsDirectStream?: boolean;
+  SupportsTranscoding?: boolean;
+  SupportsProbing?: boolean;
 }
 
 export interface JellyfinMediaStream {
@@ -69,6 +73,7 @@ export interface JellyfinMediaStream {
   Codec: string;
   Language?: string;
   IsDefault?: boolean;
+  DisplayTitle?: string;
 }
 
 export interface JellyfinSearchResult {

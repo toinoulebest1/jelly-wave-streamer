@@ -6,8 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Settings, Activity } from "lucide-react";
+import { Settings, Activity, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface VideoPlayerProps {
   itemId: string;
@@ -22,11 +23,12 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   const [showSettings, setShowSettings] = useState(false);
   const [isBitrateTestRunning, setIsBitrateTestRunning] = useState(true);
   const [detectedBitrate, setDetectedBitrate] = useState<number | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   
   // Options de lecture
   const [playbackOptions, setPlaybackOptions] = useState<PlaybackOptions>({
     enableTranscoding: true,
-    maxStreamingBitrate: 8000000, // 8 Mbps
+    maxStreamingBitrate: 8000000, // 8 Mbps par défaut
     maxWidth: window.innerWidth,
     maxHeight: window.innerHeight
   });
@@ -80,13 +82,13 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
     runBitrateTest();
   }, []);
 
-  // Générer l'URL de streaming
-  const streamUrl = mediaItem ? jellyfinService.getStreamUrl(itemId, playbackOptions) : '';
-  
+  // Récupérer les détails du média
   useEffect(() => {
     const fetchMediaDetails = async () => {
       try {
         const item = await jellyfinService.getItemDetails(itemId);
+        console.log("Media item details:", item);
+        
         if (item) {
           setMediaItem(item);
           
@@ -100,6 +102,7 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
         }
       } catch (err) {
         console.error("Erreur lors du chargement des détails:", err);
+        setError("Impossible de charger les détails du média.");
       }
     };
     
@@ -117,20 +120,74 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  // Générer l'URL de streaming basée sur les options actuelles
+  const streamUrl = mediaItem ? jellyfinService.getStreamUrl(itemId, playbackOptions) : '';
+
   useEffect(() => {
+    // Afficher l'URL de streaming pour le débogage
+    if (streamUrl) {
+      console.log("playing url:", streamUrl);
+    }
+    
     // Rechargement de la vidéo quand les options de lecture changent
     if (videoRef.current && !isBitrateTestRunning && mediaItem) {
+      setIsLoading(true);
+      setError(null);
       videoRef.current.load();
     }
   }, [streamUrl, isBitrateTestRunning, mediaItem]);
 
   const handleVideoLoad = () => {
     setIsLoading(false);
+    setError(null);
   };
 
-  const handleVideoError = () => {
+  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    console.error("Erreur de lecture vidéo:", e);
     setIsLoading(false);
-    setError("Erreur de lecture de la vidéo. Veuillez réessayer ou modifier les paramètres de lecture.");
+    
+    // Différentes erreurs possibles avec leurs codes
+    const errorMessages: Record<number, string> = {
+      1: "La lecture a été interrompue",
+      2: "Le réseau a rencontré un problème",
+      3: "Le format du média n'est pas pris en charge",
+      4: "Le média n'a pas pu être décodé",
+    };
+    
+    const videoElement = e.target as HTMLVideoElement;
+    const errorCode = videoElement.error?.code || 0;
+    const errorMessage = errorMessages[errorCode] || "Erreur de lecture de la vidéo";
+    
+    setError(`${errorMessage}. Veuillez réessayer ou modifier les paramètres de lecture.`);
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    setIsLoading(true);
+    setRetryCount(prev => prev + 1);
+    
+    // Toggle transcoding if we've tried a few times
+    if (retryCount >= 2) {
+      setPlaybackOptions(prev => ({
+        ...prev,
+        enableTranscoding: !prev.enableTranscoding
+      }));
+    } else {
+      // Réduire le bitrate de moitié si on échoue
+      setPlaybackOptions(prev => ({
+        ...prev,
+        maxStreamingBitrate: Math.max(prev.maxStreamingBitrate / 2, 1000000) // Minimum 1 Mbps
+      }));
+    }
+    
+    // Forcer le rechargement de la vidéo
+    if (videoRef.current) {
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.load();
+        }
+      }, 500);
+    }
   };
 
   const toggleTranscoding = (enabled: boolean) => {
@@ -180,27 +237,55 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
         {error && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="bg-jellyfin-dark-card p-6 rounded-md max-w-md text-center">
-              <p className="text-red-500 mb-4">{error}</p>
-              <button 
-                className="bg-jellyfin-primary hover:bg-jellyfin-secondary px-4 py-2 rounded-md"
-                onClick={onClose}
-              >
-                Fermer
-              </button>
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+              
+              <div className="flex flex-col space-y-4">
+                <button 
+                  className="flex items-center justify-center bg-jellyfin-primary hover:bg-jellyfin-secondary px-4 py-2 rounded-md"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRetry();
+                  }}
+                >
+                  <RefreshCw size={18} className="mr-2" />
+                  Réessayer
+                </button>
+                
+                <button 
+                  className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-md"
+                  onClick={onClose}
+                >
+                  Fermer
+                </button>
+              </div>
+              
+              {retryCount > 0 && (
+                <div className="mt-4 text-sm text-gray-400">
+                  {playbackOptions.enableTranscoding 
+                    ? `Transcodage activé à ${formatBitrate(playbackOptions.maxStreamingBitrate)}`
+                    : "Transcodage désactivé - Lecture directe"}
+                </div>
+              )}
             </div>
           </div>
         )}
         
-        {!isBitrateTestRunning && mediaItem && (
+        {!isBitrateTestRunning && mediaItem && !error && (
           <video
+            key={`${itemId}-${playbackOptions.enableTranscoding}-${playbackOptions.maxStreamingBitrate}`}
             ref={videoRef}
             className="w-full h-full"
             controls
             autoPlay
-            src={streamUrl}
+            poster={mediaItem?.ImageTags?.Primary ? jellyfinService.getImageUrl(mediaItem.Id, mediaItem.ImageTags.Primary) : undefined}
             onCanPlay={handleVideoLoad}
             onError={handleVideoError}
-          />
+          >
+            <source src={streamUrl} type={playbackOptions.enableTranscoding ? "application/x-mpegURL" : "video/mp4"} />
+            Votre navigateur ne prend pas en charge la lecture de vidéos.
+          </video>
         )}
         
         <div className="absolute top-4 right-16 z-10">

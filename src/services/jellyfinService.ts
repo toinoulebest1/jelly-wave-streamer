@@ -376,10 +376,13 @@ class JellyfinService {
   getStreamUrl(itemId: string, options: PlaybackOptions = {}): string {
     if (!this.isConnected || !itemId) return '';
     
+    const uniquePlaySessionId = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    
     const params = new URLSearchParams({
-      static: options.enableTranscoding ? 'false' : 'true',
+      DeviceId: this.deviceId,
+      MediaSourceId: itemId,
       api_key: this.apiKey,
-      DeviceId: this.deviceId
+      PlaySessionId: uniquePlaySessionId,
     });
     
     if (options.startTimeTicks) {
@@ -387,19 +390,17 @@ class JellyfinService {
     }
     
     if (options.audioStreamIndex !== undefined) {
-      params.append('audioStreamIndex', options.audioStreamIndex.toString());
+      params.append('AudioStreamIndex', options.audioStreamIndex.toString());
     }
     
     if (options.subtitleStreamIndex !== undefined) {
-      params.append('subtitleStreamIndex', options.subtitleStreamIndex.toString());
+      params.append('SubtitleStreamIndex', options.subtitleStreamIndex.toString());
     }
     
     if (options.enableTranscoding) {
       // Ajout des paramètres de transcodage
-      params.append('VideoCodec', 'av1,h264,vp9');
-      params.append('AudioCodec', 'aac,opus,flac');
-      params.append('TranscodingContainer', 'ts');
-      params.append('TranscodingProtocol', 'hls');
+      params.append('VideoCodec', 'h264');
+      params.append('AudioCodec', 'aac');
       
       if (options.maxStreamingBitrate) {
         params.append('VideoBitrate', options.maxStreamingBitrate.toString());
@@ -407,26 +408,26 @@ class JellyfinService {
       }
       
       if (options.maxWidth) {
-        params.append('maxWidth', options.maxWidth.toString());
+        params.append('MaxWidth', options.maxWidth.toString());
       }
       
       if (options.maxHeight) {
-        params.append('maxHeight', options.maxHeight.toString());
+        params.append('MaxHeight', options.maxHeight.toString());
       }
       
       // Paramètres supplémentaires pour un meilleur transcodage
       params.append('SubtitleMethod', 'Encode');
       params.append('TranscodingMaxAudioChannels', '2');
-      params.append('RequireAvc', 'false');
-      params.append('EnableAudioVbrEncoding', 'true');
-      params.append('SegmentContainer', 'mp4');
-      params.append('MinSegments', '1');
-      params.append('BreakOnNonKeyFrames', 'True');
+      params.append('RequireAvc', 'true');
+      params.append('h264-level', '42');
+      params.append('h264-profile', 'high');
+      params.append('TranscodeReasons', 'ContainerNotSupported,VideoCodecNotSupported,AudioCodecNotSupported');
       
-      return `${this.serverUrl}/Videos/${itemId}/master.m3u8?${params.toString()}`;
+      return `${this.serverUrl}/videos/${itemId}/master.m3u8?${params.toString()}`;
     }
     
-    return `${this.serverUrl}/Videos/${itemId}/stream?${params.toString()}`;
+    // Lecture directe (sans transcodage)
+    return `${this.serverUrl}/Videos/${itemId}/stream?static=true&${params.toString()}`;
   }
 
   formatRuntime(runtimeTicks?: number): string {
