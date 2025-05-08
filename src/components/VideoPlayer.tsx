@@ -16,7 +16,8 @@ import "video.js/dist/video-js.css";
 
 const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const videoJsRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<HTMLVideoElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
   const [player, setPlayer] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +128,7 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
 
   // Initialiser Video.js
   useEffect(() => {
-    if (playerType !== 'videojs' || !streamUrl || isBitrateTestRunning || !mediaItem || !videoJsRef.current) return;
+    if (playerType !== 'videojs' || !streamUrl || isBitrateTestRunning || !mediaItem || !playerContainerRef.current) return;
     
     setIsLoading(true);
     setError(null);
@@ -154,7 +155,14 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
     }
 
     console.log("Initializing Video.js with URL:", streamUrl);
-    const vjsPlayer = videojs(videoJsRef.current, videoJsOptions, function onPlayerReady() {
+    
+    // Create a new video element for Video.js to use
+    const videoElement = document.createElement('video');
+    videoElement.className = 'video-js vjs-big-play-centered vjs-fluid';
+    playerContainerRef.current.innerHTML = '';
+    playerContainerRef.current.appendChild(videoElement);
+    
+    const vjsPlayer = videojs(videoElement, videoJsOptions, function onPlayerReady() {
       console.log('Video.js player is ready');
       setIsLoading(false);
       
@@ -347,12 +355,8 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
         
         {!isBitrateTestRunning && mediaItem && !error && playerType === 'videojs' && (
           <div className="w-full h-full">
-            <div data-vjs-player>
-              <video 
-                ref={videoJsRef}
-                className="video-js vjs-big-play-centered vjs-fluid"
-                key={`${itemId}-${playerType}-${playbackOptions.enableTranscoding}-${playbackOptions.maxStreamingBitrate}`}
-              ></video>
+            <div ref={playerContainerRef} data-vjs-player className="h-full">
+              {/* Video.js will create and manage the video element */}
             </div>
           </div>
         )}
