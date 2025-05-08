@@ -16,7 +16,6 @@ import "video.js/dist/video-js.css";
 
 const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const playerRef = useRef<HTMLVideoElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [player, setPlayer] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -126,70 +125,89 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   // Générer l'URL de streaming basée sur les options actuelles
   const streamUrl = mediaItem ? jellyfinService.getStreamUrl(itemId, playbackOptions) : '';
 
-  // Initialiser Video.js
+  // Cleanup function to dispose of videojs player
+  const cleanupVideoJs = () => {
+    if (player) {
+      player.dispose();
+      setPlayer(null);
+    }
+  };
+
+  // Initialize Video.js when needed
   useEffect(() => {
-    if (playerType !== 'videojs' || !streamUrl || isBitrateTestRunning || !mediaItem || !playerContainerRef.current) return;
+    // Only initialize if we're using videojs player type
+    if (playerType !== 'videojs' || !streamUrl || isBitrateTestRunning || !mediaItem || !playerContainerRef.current) {
+      return;
+    }
+    
+    // Clean up any previous instances before creating a new one
+    cleanupVideoJs();
     
     setIsLoading(true);
     setError(null);
 
-    const poster = mediaItem?.ImageTags?.Primary 
-      ? jellyfinService.getImageUrl(mediaItem.Id, mediaItem.ImageTags.Primary) 
-      : undefined;
+    try {
+      // Clear the container first
+      const containerEl = playerContainerRef.current;
+      containerEl.innerHTML = '';
       
-    const videoJsOptions = {
-      autoplay: true,
-      controls: true,
-      responsive: true,
-      fluid: true,
-      poster: poster,
-      sources: [{
-        src: streamUrl,
-        type: playbackOptions.enableTranscoding ? 'application/x-mpegURL' : 'video/mp4'
-      }]
-    };
+      // Create a video element for Video.js
+      const videoElement = document.createElement('video');
+      videoElement.className = 'video-js vjs-big-play-centered vjs-fluid';
+      containerEl.appendChild(videoElement);
+      
+      // Get poster image if available
+      const poster = mediaItem?.ImageTags?.Primary 
+        ? jellyfinService.getImageUrl(mediaItem.Id, mediaItem.ImageTags.Primary) 
+        : undefined;
+        
+      // Configure Video.js options
+      const videoJsOptions = {
+        autoplay: true,
+        controls: true,
+        responsive: true,
+        fluid: true,
+        poster: poster,
+        sources: [{
+          src: streamUrl,
+          type: playbackOptions.enableTranscoding ? 'application/x-mpegURL' : 'video/mp4'
+        }]
+      };
 
-    // Nettoyer l'instance précédente du lecteur
-    if (player) {
-      player.dispose();
+      console.log("Initializing Video.js with URL:", streamUrl);
+      
+      // Initialize Video.js with the newly created element
+      const vjsPlayer = videojs(videoElement, videoJsOptions, function onPlayerReady() {
+        console.log('Video.js player is ready');
+        setIsLoading(false);
+        
+        // Add error handler
+        vjsPlayer.on('error', function() {
+          const error = vjsPlayer.error();
+          console.error("Video.js error:", error);
+          handleVideoError();
+        });
+      });
+      
+      setPlayer(vjsPlayer);
+    } catch (error) {
+      console.error("Error initializing Video.js:", error);
+      setError("Erreur lors de l'initialisation du lecteur vidéo.");
+      setIsLoading(false);
     }
 
-    console.log("Initializing Video.js with URL:", streamUrl);
-    
-    // Create a new video element for Video.js to use
-    const videoElement = document.createElement('video');
-    videoElement.className = 'video-js vjs-big-play-centered vjs-fluid';
-    playerContainerRef.current.innerHTML = '';
-    playerContainerRef.current.appendChild(videoElement);
-    
-    const vjsPlayer = videojs(videoElement, videoJsOptions, function onPlayerReady() {
-      console.log('Video.js player is ready');
-      setIsLoading(false);
-      
-      vjsPlayer.on('error', function() {
-        const error = vjsPlayer.error();
-        console.error("Video.js error:", error);
-        handleVideoError();
-      });
-    });
-    
-    setPlayer(vjsPlayer);
-
-    return () => {
-      if (vjsPlayer) {
-        vjsPlayer.dispose();
-      }
-    };
+    // Cleanup on unmount or when dependencies change
+    return cleanupVideoJs;
   }, [streamUrl, isBitrateTestRunning, mediaItem, playerType, playbackOptions.enableTranscoding]);
 
-  // Effet pour le lecteur natif (quand Video.js n'est pas utilisé)
+  // Effect for native player
   useEffect(() => {
-    // Afficher l'URL de streaming pour le débogage
+    // Display streaming URL for debugging
     if (streamUrl) {
       console.log("Playing URL:", streamUrl);
     }
     
-    // Rechargement de la vidéo quand les options de lecture changent (pour le lecteur natif)
+    // Reload video when playback options change (for native player)
     if (videoRef.current && !isBitrateTestRunning && mediaItem && playerType === 'native') {
       setIsLoading(true);
       setError(null);
@@ -227,10 +245,9 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
       }));
     }
     
-    // Si on utilise videojs, on doit réinitialiser le lecteur
-    if (playerType === 'videojs' && player) {
-      player.dispose();
-      setPlayer(null);
+    // Handle player restart based on type
+    if (playerType === 'videojs') {
+      cleanupVideoJs();
     } else if (playerType === 'native' && videoRef.current) {
       // Forcer le rechargement de la vidéo
       setTimeout(() => {
@@ -264,14 +281,15 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
   };
 
   const handleSwitchPlayer = (type: 'native' | 'videojs') => {
+    if (type === playerType) return; // No change needed
+    
     setPlayerType(type);
     setError(null);
     setIsLoading(true);
     
-    // Si on passe à videojs et qu'un player existe déjà, on le nettoie
+    // If switching from videojs, clean it up
     if (type === 'native' && player) {
-      player.dispose();
-      setPlayer(null);
+      cleanupVideoJs();
     }
     
     toast.info(`Lecteur ${type === 'native' ? 'natif' : 'Video.js'} activé`);
@@ -355,9 +373,7 @@ const VideoPlayer = ({ itemId, onClose }: VideoPlayerProps) => {
         
         {!isBitrateTestRunning && mediaItem && !error && playerType === 'videojs' && (
           <div className="w-full h-full">
-            <div ref={playerContainerRef} data-vjs-player className="h-full">
-              {/* Video.js will create and manage the video element */}
-            </div>
+            <div ref={playerContainerRef} className="video-container h-full"></div>
           </div>
         )}
         
