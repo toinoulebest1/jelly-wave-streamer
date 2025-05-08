@@ -53,9 +53,35 @@ export interface JellyfinMediaItem {
     Played?: boolean;
     IsFavorite?: boolean;
   };
+  MediaSources?: JellyfinMediaSource[];
+}
+
+export interface JellyfinMediaSource {
+  Id: string;
+  Name?: string;
+  Container?: string;
+  MediaStreams?: JellyfinMediaStream[];
+}
+
+export interface JellyfinMediaStream {
+  Type: string; // Audio, Video, Subtitle
+  Index: number;
+  Codec: string;
+  Language?: string;
+  IsDefault?: boolean;
 }
 
 export interface JellyfinSearchResult {
   Items: JellyfinMediaItem[];
   TotalRecordCount: number;
+}
+
+export interface PlaybackOptions {
+  startTimeTicks?: number;
+  audioStreamIndex?: number;
+  subtitleStreamIndex?: number;
+  maxStreamingBitrate?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  enableTranscoding?: boolean;
 }

@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { JellyfinAuthResponse, JellyfinCredentials, JellyfinLibrary, JellyfinMediaItem, JellyfinSearchResult, JellyfinUser } from "../types/jellyfin";
+import { JellyfinAuthResponse, JellyfinCredentials, JellyfinLibrary, JellyfinMediaItem, JellyfinSearchResult, JellyfinUser, PlaybackOptions } from "../types/jellyfin";
 
 class JellyfinService {
   private serverUrl: string = '';
@@ -324,8 +324,51 @@ class JellyfinService {
     return `${this.serverUrl}/Items/${itemId}/Images/Backdrop?${params.toString()}`;
   }
 
-  getStreamUrl(itemId: string): string {
-    return `${this.serverUrl}/Videos/${itemId}/stream?static=true&api_key=${this.apiKey}`;
+  getStreamUrl(itemId: string, options: PlaybackOptions = {}): string {
+    if (!this.isConnected || !itemId) return '';
+    
+    const params = new URLSearchParams({
+      static: options.enableTranscoding ? 'false' : 'true',
+      api_key: this.apiKey
+    });
+    
+    if (options.startTimeTicks) {
+      params.append('startTimeTicks', options.startTimeTicks.toString());
+    }
+    
+    if (options.audioStreamIndex !== undefined) {
+      params.append('audioStreamIndex', options.audioStreamIndex.toString());
+    }
+    
+    if (options.subtitleStreamIndex !== undefined) {
+      params.append('subtitleStreamIndex', options.subtitleStreamIndex.toString());
+    }
+    
+    if (options.enableTranscoding) {
+      // Ajout des paramètres de transcodage
+      params.append('VideoCodec', 'h264');
+      params.append('AudioCodec', 'aac');
+      params.append('TranscodingContainer', 'ts');
+      params.append('TranscodingProtocol', 'hls');
+      
+      if (options.maxStreamingBitrate) {
+        params.append('MaxStreamingBitrate', options.maxStreamingBitrate.toString());
+      } else {
+        params.append('MaxStreamingBitrate', '8000000'); // 8 Mbps par défaut
+      }
+      
+      if (options.maxWidth) {
+        params.append('maxWidth', options.maxWidth.toString());
+      }
+      
+      if (options.maxHeight) {
+        params.append('maxHeight', options.maxHeight.toString());
+      }
+      
+      return `${this.serverUrl}/Videos/${itemId}/master.m3u8?${params.toString()}`;
+    }
+    
+    return `${this.serverUrl}/Videos/${itemId}/stream?${params.toString()}`;
   }
 
   formatRuntime(runtimeTicks?: number): string {
@@ -340,6 +383,26 @@ class JellyfinService {
       return `${hours}h ${minutes}min`;
     }
     return `${minutes}min`;
+  }
+
+  // Ajouter une méthode pour obtenir les détails de streaming d'un média
+  async getPlaybackInfo(itemId: string): Promise<any> {
+    try {
+      if (!this.isConnected || !itemId) return null;
+      
+      const response = await fetch(`${this.serverUrl}/Items/${itemId}/PlaybackInfo`, {
+        headers: this.getHeaders(),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Échec de la récupération des infos de lecture: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`Erreur lors de la récupération des infos de lecture pour l'item ${itemId}:`, error);
+      return null;
+    }
   }
 }
 
