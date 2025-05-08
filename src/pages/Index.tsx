@@ -16,12 +16,14 @@ const Index = () => {
         const user = await jellyfinService.getCurrentUser();
         if (user) {
           setIsConnected(true);
+          // Move the navigation to inside the useEffect
+          navigate("/home");
         }
       }
     };
 
     checkConnection();
-  }, []);
+  }, [navigate]);
 
   const handleLoginSuccess = () => {
     setIsConnected(true);
@@ -33,9 +35,8 @@ const Index = () => {
     setIsConnected(false);
   };
 
-  if (isConnected) {
-    navigate("/home");
-  }
+  // Remove the conditional navigation from the render phase
+  // This was causing the React warning
 
   return (
     <div className="min-h-screen bg-jellyfin-dark flex flex-col">
